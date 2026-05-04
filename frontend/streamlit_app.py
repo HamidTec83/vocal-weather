@@ -64,6 +64,16 @@ div[data-testid="stBokehChart"] {
     border-radius: 14px;
     border: 1px solid #374151;
     margin-top: 1rem;
+    margin-bottom: 1rem;
+}
+
+.weather-box h3 {
+    margin-bottom: 0.4rem;
+}
+
+.weather-box p {
+    color: #d1d5db;
+    margin-bottom: 0;
 }
 
 .small-muted {
@@ -81,6 +91,11 @@ div[data-testid="stBokehChart"] {
 def lire_reponse_orale(texte: str) -> None:
     """
     Lit une réponse à voix haute dans le navigateur.
+
+    Utilise SpeechSynthesis :
+    - gratuit
+    - intégré à Chrome / Edge
+    - aucune clé API nécessaire
     """
 
     components.html(
@@ -107,6 +122,9 @@ def lire_reponse_orale(texte: str) -> None:
 def afficher_carte(latitude: float, longitude: float, lieu: str) -> None:
     """
     Affiche une carte Folium centrée sur la ville détectée.
+
+    On utilise components.html() au lieu de st_folium()
+    pour éviter les erreurs de sérialisation JSON.
     """
 
     carte = folium.Map(
@@ -134,7 +152,7 @@ def afficher_graphiques_7_jours(previsions: list[dict]) -> None:
     """
     Affiche les prévisions météo sur 7 jours avec Plotly.
 
-    Améliorations expert :
+    Améliorations :
     - tooltips enrichis
     - grille douce
     - ligne moyenne température max
@@ -184,7 +202,6 @@ def afficher_graphiques_7_jours(previsions: list[dict]) -> None:
         hovertemplate="Date : %{x}<br>Température min : %{y} °C<extra></extra>",
     ))
 
-    # Ligne moyenne
     fig_temp.add_hline(
         y=moyenne_temp_max,
         line_dash="dot",
@@ -258,12 +275,37 @@ def afficher_graphiques_7_jours(previsions: list[dict]) -> None:
 # AFFICHAGE MÉTÉO
 # =========================
 
+def badge_meteo(description: str | None) -> str:
+    """
+    Retourne un badge visuel selon la description météo.
+    """
+
+    description_lower = (description or "").lower()
+
+    if "orage" in description_lower:
+        return "⛈️ Orage"
+    if "pluie" in description_lower or "averse" in description_lower:
+        return "🌧️ Pluie"
+    if "nuage" in description_lower or "couvert" in description_lower:
+        return "☁️ Nuageux"
+    if "soleil" in description_lower or "dégagé" in description_lower:
+        return "☀️ Ensoleillé"
+
+    return "🌤️ Variable"
+
+
 def afficher_resultat(data: dict) -> None:
     """
-    Affiche les données météo retournées par l'API.
+    Affiche les données météo retournées par l'API :
+    - résumé météo
+    - badge météo
+    - carte
+    - graphiques 7 jours
+    - réponse orale
     """
 
     meteo = data["meteo"]
+    description = meteo.get("description", "")
 
     st.success(f"📍 {data['lieu']} — horizon : {data['horizon']}")
 
@@ -274,7 +316,14 @@ def afficher_resultat(data: dict) -> None:
     col3.metric("🌧️ Pluie", f"{meteo.get('precipitation')} mm")
     col4.metric("💨 Vent", f"{meteo.get('vent_max')} km/h")
 
-    st.info(f"Conditions : {meteo.get('description')}")
+    badge = badge_meteo(description)
+
+    st.markdown(f"""
+    <div class="weather-box">
+        <h3>{badge}</h3>
+        <p>{description}</p>
+    </div>
+    """, unsafe_allow_html=True)
 
     if data.get("texte"):
         st.caption(f"Texte analysé : « {data['texte']} »")
@@ -292,7 +341,7 @@ def afficher_resultat(data: dict) -> None:
 
     phrase_orale = (
         f"La météo pour {data['lieu']} {data['horizon']} est : "
-        f"{meteo.get('description')}. "
+        f"{description}. "
         f"La température maximale est de {meteo.get('temp_max')} degrés, "
         f"et la température minimale est de {meteo.get('temp_min')} degrés."
     )
@@ -320,27 +369,37 @@ def afficher_erreur_api(response: requests.Response) -> None:
 def appeler_api_meteo(texte: str) -> None:
     """
     Envoie une phrase météo à l'endpoint /meteo.
+    Affiche une progression pour améliorer l'expérience utilisateur.
     """
 
     if not texte.strip():
         st.warning("Veuillez entrer une question météo.")
         return
 
-    with st.spinner("Analyse de la demande météo..."):
-        try:
-            response = requests.post(
-                f"{API_URL}/meteo",
-                json={"texte": texte},
-                timeout=20,
-            )
+    progress = st.progress(0, text="Analyse en cours...")
 
-            if response.status_code == 200:
-                afficher_resultat(response.json())
-            else:
-                afficher_erreur_api(response)
+    try:
+        progress.progress(20, text="Extraction de la demande...")
 
-        except requests.RequestException as e:
-            st.error(f"Impossible de contacter l'API : {e}")
+        response = requests.post(
+            f"{API_URL}/meteo",
+            json={"texte": texte},
+            timeout=20,
+        )
+
+        progress.progress(60, text="Récupération météo...")
+
+        if response.status_code == 200:
+            progress.progress(100, text="Affichage des résultats...")
+            progress.empty()
+            afficher_resultat(response.json())
+        else:
+            progress.empty()
+            afficher_erreur_api(response)
+
+    except requests.RequestException as e:
+        progress.empty()
+        st.error(f"Impossible de contacter l'API : {e}")
 
 
 def appeler_api_audio(fichier_audio) -> None:
@@ -527,7 +586,13 @@ with col_history:
             if not historique:
                 st.info("Aucune recherche pour le moment.")
             else:
-                for item in historique[:10]:
+                historique_trie = sorted(
+                    historique,
+                    key=lambda x: x.get("timestamp", ""),
+                    reverse=True,
+                )
+
+                for item in historique_trie[:10]:
                     titre = (
                         f"{item.get('lieu_detecte') or '?'} "
                         f"— {item.get('horizon')}"
