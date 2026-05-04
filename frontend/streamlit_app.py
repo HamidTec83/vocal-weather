@@ -9,16 +9,18 @@ Fonctionnalités :
 - Recherche météo via micro navigateur
 - Affichage des résultats météo
 - Carte géographique de la ville détectée
+- Graphiques météo sur 7 jours avec Plotly
 - Réponse vocale automatique
 - Historique des recherches
 """
 
+from datetime import datetime
+
+import folium
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
-
-import folium
-
 
 from bokeh.models import Button, CustomJS
 from streamlit_bokeh_events import streamlit_bokeh_events
@@ -79,11 +81,6 @@ div[data-testid="stBokehChart"] {
 def lire_reponse_orale(texte: str) -> None:
     """
     Lit une réponse à voix haute dans le navigateur.
-
-    Utilise SpeechSynthesis :
-    - gratuit
-    - intégré à Chrome / Edge
-    - aucune clé API nécessaire
     """
 
     components.html(
@@ -110,9 +107,6 @@ def lire_reponse_orale(texte: str) -> None:
 def afficher_carte(latitude: float, longitude: float, lieu: str) -> None:
     """
     Affiche une carte Folium centrée sur la ville détectée.
-
-    Cette version utilise components.html()
-    au lieu de st_folium(), pour éviter les erreurs de sérialisation JSON.
     """
 
     carte = folium.Map(
@@ -129,15 +123,135 @@ def afficher_carte(latitude: float, longitude: float, lieu: str) -> None:
     ).add_to(carte)
 
     st.subheader("🗺️ Localisation")
+    components.html(carte._repr_html_(), height=400)
 
-    # Conversion de la carte Folium en HTML
-    carte_html = carte._repr_html_()
 
-    # Affichage dans Streamlit
-    components.html(
-        carte_html,
-        height=400,
+# =========================
+# GRAPHIQUES 7 JOURS
+# =========================
+
+def afficher_graphiques_7_jours(previsions: list[dict]) -> None:
+    """
+    Affiche les prévisions météo sur 7 jours avec Plotly.
+
+    Améliorations expert :
+    - tooltips enrichis
+    - grille douce
+    - ligne moyenne température max
+    - barres de pluie lisibles
+    """
+
+    if not previsions:
+        st.warning("Prévisions 7 jours indisponibles.")
+        return
+
+    dates = [
+        datetime.strptime(jour["date"], "%Y-%m-%d").strftime("%d/%m")
+        for jour in previsions
+    ]
+
+    temp_max = [jour["temp_max"] for jour in previsions]
+    temp_min = [jour["temp_min"] for jour in previsions]
+    precipitations = [jour["precipitation"] for jour in previsions]
+
+    moyenne_temp_max = sum(temp_max) / len(temp_max)
+
+    st.subheader("📊 Prévisions sur 7 jours")
+
+    # -------------------------
+    # Graphique températures
+    # -------------------------
+
+    fig_temp = go.Figure()
+
+    fig_temp.add_trace(go.Scatter(
+        x=dates,
+        y=temp_max,
+        mode="lines+markers",
+        name="Température max",
+        line=dict(color="#3b82f6", width=3),
+        marker=dict(size=8),
+        hovertemplate="Date : %{x}<br>Température max : %{y} °C<extra></extra>",
+    ))
+
+    fig_temp.add_trace(go.Scatter(
+        x=dates,
+        y=temp_min,
+        mode="lines+markers",
+        name="Température min",
+        line=dict(color="#ef4444", width=3),
+        marker=dict(size=8),
+        hovertemplate="Date : %{x}<br>Température min : %{y} °C<extra></extra>",
+    ))
+
+    # Ligne moyenne
+    fig_temp.add_hline(
+        y=moyenne_temp_max,
+        line_dash="dot",
+        line_color="#9ca3af",
+        annotation_text=f"Moyenne max : {moyenne_temp_max:.1f} °C",
+        annotation_position="top right",
     )
+
+    fig_temp.update_layout(
+        title="Températures sur 7 jours",
+        xaxis_title="Date",
+        yaxis_title="Température (°C)",
+        template="plotly_dark",
+        height=380,
+        margin=dict(l=20, r=20, t=60, b=30),
+        hovermode="x unified",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+        ),
+        xaxis=dict(
+            showgrid=False,
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.12)",
+        ),
+    )
+
+    st.plotly_chart(fig_temp, use_container_width=True)
+
+    # -------------------------
+    # Graphique précipitations
+    # -------------------------
+
+    fig_rain = go.Figure()
+
+    fig_rain.add_trace(go.Bar(
+        x=dates,
+        y=precipitations,
+        name="Précipitations",
+        marker=dict(color="#6366f1"),
+        text=[f"{p} mm" for p in precipitations],
+        textposition="outside",
+        hovertemplate="Date : %{x}<br>Précipitations : %{y} mm<extra></extra>",
+    ))
+
+    fig_rain.update_layout(
+        title="Précipitations sur 7 jours",
+        xaxis_title="Date",
+        yaxis_title="Précipitations (mm)",
+        template="plotly_dark",
+        height=380,
+        margin=dict(l=20, r=20, t=60, b=30),
+        xaxis=dict(
+            showgrid=False,
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="rgba(255,255,255,0.12)",
+        ),
+    )
+
+    st.plotly_chart(fig_rain, use_container_width=True)
 
 
 # =========================
@@ -146,9 +260,7 @@ def afficher_carte(latitude: float, longitude: float, lieu: str) -> None:
 
 def afficher_resultat(data: dict) -> None:
     """
-    Affiche les données météo retournées par l'API,
-    affiche la carte si les coordonnées sont disponibles,
-    et déclenche la réponse vocale.
+    Affiche les données météo retournées par l'API.
     """
 
     meteo = data["meteo"]
@@ -167,17 +279,16 @@ def afficher_resultat(data: dict) -> None:
     if data.get("texte"):
         st.caption(f"Texte analysé : « {data['texte']} »")
 
-    # Affichage carte si l'API renvoie latitude + longitude
     if data.get("latitude") is not None and data.get("longitude") is not None:
         afficher_carte(
             latitude=data["latitude"],
             longitude=data["longitude"],
             lieu=data["lieu"],
         )
-    else:
-        st.warning(
-            "Carte non affichée : latitude/longitude absentes dans la réponse API."
-        )
+
+    afficher_graphiques_7_jours(
+        data.get("previsions_7_jours", [])
+    )
 
     phrase_orale = (
         f"La météo pour {data['lieu']} {data['horizon']} est : "
