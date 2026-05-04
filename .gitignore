@@ -1,0 +1,37 @@
+# Environnement virtuel
+venv/
+
+# Variables d'environnement
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# Base de données
+*.db
+data/*.db
+!data/.gitkeep
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+
+# VS Code
+.vscode/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit cache (important pour ton projet)
+.streamlit/
+
+# Fichiers audio de test
+*.wav
+*.mp3
+*.m4a
