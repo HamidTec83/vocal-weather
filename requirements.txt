@@ -24,3 +24,6 @@ openai==1.30.1
 # Micro (Web Speech bridge)
 streamlit-bokeh-events==0.1.2
 bokeh==2.4.3
+
+# Visualisations
+plotly

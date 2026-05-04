@@ -1,19 +1,21 @@
 """
 streamlit_app.py
 
-Interface complète Vocal Weather :
+Interface complète Vocal Weather.
 
 Fonctionnalités :
 - Recherche météo par texte
-- Recherche via micro navigateur
-- Affichage des résultats
-- Historique
-- 🔊 Réponse orale automatique (Text-to-Speech)
+- Recherche météo via fichier audio
+- Recherche météo via micro navigateur
+- Affichage des résultats météo
+- Réponse vocale automatique
+- Historique des recherches
 
-Technos :
+Technologies :
 - Streamlit
-- FastAPI (backend)
-- Web Speech API (micro + voix)
+- FastAPI
+- Web Speech API
+- SpeechSynthesis API
 """
 
 import requests
@@ -36,37 +38,66 @@ st.set_page_config(
     layout="wide",
 )
 
-# Supprime le fond gris du bouton micro (Bokeh)
+
+# =========================
+# STYLE CSS PERSONNALISÉ
+# =========================
+
 st.markdown("""
 <style>
+.stApp {
+    background-color: #0e1117;
+}
+
+h1, h2, h3 {
+    color: #ffffff;
+}
+
 div[data-testid="stBokehChart"] {
     background: transparent !important;
     border: none !important;
+}
+
+.weather-box {
+    background-color: #111827;
+    padding: 1rem;
+    border-radius: 14px;
+    border: 1px solid #374151;
+    margin-top: 1rem;
+}
+
+.small-muted {
+    color: #9ca3af;
+    font-size: 0.9rem;
 }
 </style>
 """, unsafe_allow_html=True)
 
 
 # =========================
-# TEXT TO SPEECH 🔊
+# TEXT TO SPEECH
 # =========================
 
 def lire_reponse_orale(texte: str) -> None:
     """
-    Lit une phrase à voix haute dans le navigateur.
+    Lit une réponse à voix haute dans le navigateur.
 
     Utilise SpeechSynthesis :
     - gratuit
     - intégré à Chrome / Edge
+    - aucune clé API nécessaire
     """
 
     components.html(
         f"""
         <script>
+            window.speechSynthesis.cancel();
+
             const message = new SpeechSynthesisUtterance({texte!r});
             message.lang = "fr-FR";
             message.rate = 1;
             message.pitch = 1;
+
             window.speechSynthesis.speak(message);
         </script>
         """,
@@ -75,12 +106,13 @@ def lire_reponse_orale(texte: str) -> None:
 
 
 # =========================
-# AFFICHAGE RESULTAT
+# AFFICHAGE MÉTÉO
 # =========================
 
 def afficher_resultat(data: dict) -> None:
     """
-    Affiche la météo + déclenche la réponse orale.
+    Affiche les données météo retournées par l'API
+    et déclenche la réponse vocale.
     """
 
     meteo = data["meteo"]
@@ -96,32 +128,46 @@ def afficher_resultat(data: dict) -> None:
 
     st.info(f"Conditions : {meteo.get('description')}")
 
-    # -------------------------
-    # 🔊 PHRASE ORALE
-    # -------------------------
-    phrase = (
-        f"La météo pour {data['lieu']} {data['horizon']} est {meteo.get('description')}. "
+    if data.get("texte"):
+        st.caption(f"Texte analysé : « {data['texte']} »")
+
+    phrase_orale = (
+        f"La météo pour {data['lieu']} {data['horizon']} est : "
+        f"{meteo.get('description')}. "
         f"La température maximale est de {meteo.get('temp_max')} degrés, "
-        f"et la minimale est de {meteo.get('temp_min')} degrés."
+        f"et la température minimale est de {meteo.get('temp_min')} degrés."
     )
 
-    lire_reponse_orale(phrase)
+    lire_reponse_orale(phrase_orale)
 
 
 # =========================
-# APPEL API
+# APPELS API
 # =========================
+
+def afficher_erreur_api(response: requests.Response) -> None:
+    """
+    Affiche une erreur lisible venant de FastAPI.
+    """
+
+    try:
+        detail = response.json().get("detail", response.text)
+    except ValueError:
+        detail = response.text
+
+    st.error(detail)
+
 
 def appeler_api_meteo(texte: str) -> None:
     """
-    Envoie la requête texte au backend FastAPI.
+    Envoie une phrase météo à l'endpoint /meteo.
     """
 
     if not texte.strip():
-        st.warning("Veuillez entrer une question.")
+        st.warning("Veuillez entrer une question météo.")
         return
 
-    with st.spinner("Analyse en cours..."):
+    with st.spinner("Analyse de la demande météo..."):
         try:
             response = requests.post(
                 f"{API_URL}/meteo",
@@ -132,73 +178,133 @@ def appeler_api_meteo(texte: str) -> None:
             if response.status_code == 200:
                 afficher_resultat(response.json())
             else:
-                st.error(response.text)
+                afficher_erreur_api(response)
 
-        except Exception as e:
-            st.error(f"Erreur API : {e}")
+        except requests.RequestException as e:
+            st.error(f"Impossible de contacter l'API : {e}")
+
+
+def appeler_api_audio(fichier_audio) -> None:
+    """
+    Envoie un fichier audio à l'endpoint /meteo-vocale.
+    """
+
+    with st.spinner("Transcription et analyse météo..."):
+        try:
+            response = requests.post(
+                f"{API_URL}/meteo-vocale",
+                files={
+                    "fichier": (
+                        fichier_audio.name,
+                        fichier_audio,
+                        fichier_audio.type,
+                    )
+                },
+                timeout=30,
+            )
+
+            if response.status_code == 200:
+                afficher_resultat(response.json())
+            else:
+                afficher_erreur_api(response)
+
+        except requests.RequestException as e:
+            st.error(f"Impossible de contacter l'API : {e}")
 
 
 # =========================
-# INTERFACE
+# INTERFACE PRINCIPALE
 # =========================
 
 st.title("🌤️ Vocal Weather")
-st.caption("Demandez la météo par texte ou micro 🎤")
+st.caption("Demandez la météo par texte, fichier audio ou micro 🎤")
 
 col_main, col_history = st.columns([2, 1])
 
 
 # =========================
-# PARTIE PRINCIPALE
+# COLONNE PRINCIPALE
 # =========================
 
 with col_main:
-
     st.subheader("🔎 Recherche météo")
 
-    tab1, tab2 = st.tabs(["📝 Texte", "🎤 Micro"])
+    tab_texte, tab_audio, tab_micro = st.tabs(
+        ["📝 Texte", "🎧 Fichier audio", "🎤 Micro"]
+    )
 
     # -------------------------
     # TEXTE
     # -------------------------
-    with tab1:
+
+    with tab_texte:
         texte = st.text_input(
             "Votre question météo",
-            placeholder="Ex: Quel temps fera-t-il à Paris demain ?"
+            placeholder="Ex : Quel temps fera-t-il à Paris demain ?",
+            key="texte_input",
         )
 
-        if st.button("Obtenir la météo"):
+        if st.button("Obtenir la météo", type="primary", key="btn_texte"):
             appeler_api_meteo(texte)
 
     # -------------------------
-    # MICRO 🎤
+    # FICHIER AUDIO
     # -------------------------
-    with tab2:
 
-        st.info("Fonctionne avec Chrome / Edge.")
+    with tab_audio:
+        st.info(
+            "Si STT_PROVIDER=mock dans .env, le contenu réel du fichier audio "
+            "est ignoré et une phrase de test est utilisée."
+        )
 
-        st.write("Cliquez puis parlez.")
+        fichier_audio = st.file_uploader(
+            "Fichier audio",
+            type=["wav", "mp3", "m4a"],
+            help="Formats acceptés : wav, mp3, m4a",
+        )
 
-        # Bouton JS
-        bouton = Button(label="🎤 Parler", button_type="success")
+        if fichier_audio is not None:
+            st.audio(fichier_audio)
 
-        bouton.js_on_event(
+            if st.button("Analyser l'audio", type="primary", key="btn_audio"):
+                appeler_api_audio(fichier_audio)
+
+    # -------------------------
+    # MICRO
+    # -------------------------
+
+    with tab_micro:
+        st.info("Fonctionne principalement avec Chrome / Edge.")
+        st.write("Cliquez sur le bouton puis dictez votre question météo.")
+
+        bouton_micro = Button(
+            label="🎤 Parler",
+            button_type="success",
+            width=220,
+        )
+
+        bouton_micro.js_on_event(
             "button_click",
-            CustomJS(code="""
+            CustomJS(
+                code="""
                 const SpeechRecognition =
                     window.SpeechRecognition || window.webkitSpeechRecognition;
 
                 if (!SpeechRecognition) {
                     document.dispatchEvent(
                         new CustomEvent("GET_TEXT", {
-                            detail: "ERREUR navigateur"
+                            detail: "ERREUR: navigateur non compatible"
                         })
                     );
                     return;
                 }
 
                 const recognition = new SpeechRecognition();
+
                 recognition.lang = "fr-FR";
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                recognition.maxAlternatives = 1;
 
                 recognition.start();
 
@@ -209,24 +315,35 @@ with col_main:
                         new CustomEvent("GET_TEXT", { detail: texte })
                     );
                 };
-            """)
+
+                recognition.onerror = function(event) {
+                    document.dispatchEvent(
+                        new CustomEvent("GET_TEXT", {
+                            detail: "ERREUR MICRO: " + event.error
+                        })
+                    );
+                };
+                """
+            ),
         )
 
-        # Capture événement JS
         result = streamlit_bokeh_events(
-            bouton,
+            bouton_micro,
             events="GET_TEXT",
-            key="mic",
+            key="micro_event",
             refresh_on_update=False,
             override_height=80,
+            debounce_time=0,
         )
 
         if result and "GET_TEXT" in result:
             texte_micro = result["GET_TEXT"]
 
-            st.success(f"🎤 Texte reconnu : {texte_micro}")
-
-            appeler_api_meteo(texte_micro)
+            if texte_micro.startswith("ERREUR"):
+                st.error(texte_micro)
+            else:
+                st.success(f"🎤 Texte reconnu : {texte_micro}")
+                appeler_api_meteo(texte_micro)
 
 
 # =========================
@@ -234,22 +351,41 @@ with col_main:
 # =========================
 
 with col_history:
-
     st.subheader("📜 Historique")
 
-    if st.button("Actualiser"):
+    if st.button("Actualiser", key="btn_historique"):
         st.rerun()
 
     try:
-        response = requests.get(f"{API_URL}/historique")
+        response = requests.get(
+            f"{API_URL}/historique",
+            timeout=10,
+        )
 
         if response.status_code == 200:
-            historique = response.json()["historique"]
+            historique = response.json().get("historique", [])
 
-            for item in historique[:10]:
-                with st.expander(f"{item['lieu_detecte']} — {item['horizon']}"):
-                    st.write(item["texte_brut"])
-                    st.write(item["description"])
+            if not historique:
+                st.info("Aucune recherche pour le moment.")
+            else:
+                for item in historique[:10]:
+                    titre = (
+                        f"{item.get('lieu_detecte') or '?'} "
+                        f"— {item.get('horizon')}"
+                    )
 
-    except:
-        st.warning("API non disponible")
+                    with st.expander(titre):
+                        st.write(f"**Texte :** {item.get('texte_brut')}")
+                        st.write(f"**Date :** {item.get('timestamp')}")
+                        st.write(f"**Statut :** {item.get('statut')}")
+
+                        if item.get("description"):
+                            st.write(f"**Météo :** {item.get('description')}")
+                            st.write(f"**Temp. max :** {item.get('temp_max')} °C")
+                            st.write(f"**Temp. min :** {item.get('temp_min')} °C")
+
+        else:
+            st.warning("Impossible de charger l'historique.")
+
+    except requests.RequestException:
+        st.warning("API non disponible. Lance d'abord FastAPI.")
