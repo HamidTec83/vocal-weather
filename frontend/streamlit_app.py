@@ -8,19 +8,17 @@ Fonctionnalités :
 - Recherche météo via fichier audio
 - Recherche météo via micro navigateur
 - Affichage des résultats météo
+- Carte géographique de la ville détectée
 - Réponse vocale automatique
 - Historique des recherches
-
-Technologies :
-- Streamlit
-- FastAPI
-- Web Speech API
-- SpeechSynthesis API
 """
 
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
+
+import folium
+
 
 from bokeh.models import Button, CustomJS
 from streamlit_bokeh_events import streamlit_bokeh_events
@@ -106,12 +104,50 @@ def lire_reponse_orale(texte: str) -> None:
 
 
 # =========================
+# CARTE GÉOGRAPHIQUE
+# =========================
+
+def afficher_carte(latitude: float, longitude: float, lieu: str) -> None:
+    """
+    Affiche une carte Folium centrée sur la ville détectée.
+
+    Cette version utilise components.html()
+    au lieu de st_folium(), pour éviter les erreurs de sérialisation JSON.
+    """
+
+    carte = folium.Map(
+        location=[latitude, longitude],
+        zoom_start=10,
+        tiles="OpenStreetMap",
+    )
+
+    folium.Marker(
+        location=[latitude, longitude],
+        tooltip=lieu,
+        popup=f"📍 {lieu}",
+        icon=folium.Icon(color="red", icon="info-sign"),
+    ).add_to(carte)
+
+    st.subheader("🗺️ Localisation")
+
+    # Conversion de la carte Folium en HTML
+    carte_html = carte._repr_html_()
+
+    # Affichage dans Streamlit
+    components.html(
+        carte_html,
+        height=400,
+    )
+
+
+# =========================
 # AFFICHAGE MÉTÉO
 # =========================
 
 def afficher_resultat(data: dict) -> None:
     """
-    Affiche les données météo retournées par l'API
+    Affiche les données météo retournées par l'API,
+    affiche la carte si les coordonnées sont disponibles,
     et déclenche la réponse vocale.
     """
 
@@ -130,6 +166,18 @@ def afficher_resultat(data: dict) -> None:
 
     if data.get("texte"):
         st.caption(f"Texte analysé : « {data['texte']} »")
+
+    # Affichage carte si l'API renvoie latitude + longitude
+    if data.get("latitude") is not None and data.get("longitude") is not None:
+        afficher_carte(
+            latitude=data["latitude"],
+            longitude=data["longitude"],
+            lieu=data["lieu"],
+        )
+    else:
+        st.warning(
+            "Carte non affichée : latitude/longitude absentes dans la réponse API."
+        )
 
     phrase_orale = (
         f"La météo pour {data['lieu']} {data['horizon']} est : "
@@ -347,7 +395,7 @@ with col_main:
 
 
 # =========================
-# HISTORIQUE
+# COLONNE HISTORIQUE
 # =========================
 
 with col_history:

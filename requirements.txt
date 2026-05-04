@@ -26,4 +26,8 @@ streamlit-bokeh-events==0.1.2
 bokeh==2.4.3
 
 # Visualisations
-plotly
+plotly==6.7.0
+
+# Cartographie
+folium==0.20.0
+streamlit-folium==0.27.2

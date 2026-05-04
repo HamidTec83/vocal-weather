@@ -22,13 +22,14 @@ from app.services.weather_service import (
 )
 
 
-# Router dédié aux routes météo
+# Router dédié aux routes météo.
+# Toutes les routes de ce fichier commenceront par /api/v1
 router = APIRouter(prefix=settings.api_prefix)
 
 
 class MeteoTexteRequest(BaseModel):
     """
-    Modèle attendu dans le body JSON.
+    Modèle de données attendu dans le body JSON.
 
     Exemple :
     {
@@ -47,15 +48,18 @@ def meteo_depuis_texte(payload: MeteoTexteRequest) -> dict:
     Étapes :
     1. Extraire l'intention : lieu + horizon
     2. Convertir le lieu en coordonnées GPS
-    3. Récupérer la météo Open-Meteo
+    3. Récupérer la météo avec Open-Meteo
     4. Extraire le bon jour selon l'horizon
-    5. Sauvegarder la requête en base
-    6. Retourner une réponse claire
+    5. Sauvegarder la requête en base SQLite
+    6. Retourner une réponse complète au frontend
     """
 
     texte = payload.texte
 
-    # 1. NLU : extraction lieu + horizon
+    # =========================
+    # 1. NLU : lieu + horizon
+    # =========================
+
     intention = extraire_intention(texte)
     lieu = intention["lieu"]
     horizon = intention["horizon"]
@@ -65,7 +69,7 @@ def meteo_depuis_texte(payload: MeteoTexteRequest) -> dict:
             texte_brut=texte,
             lieu_detecte=None,
             horizon=horizon,
-            service_stt="mock",
+            service_stt="web_speech",
             statut="lieu_inconnu"
         ))
 
@@ -74,7 +78,10 @@ def meteo_depuis_texte(payload: MeteoTexteRequest) -> dict:
             detail="Aucun lieu détecté dans la phrase."
         )
 
-    # 2. Géocodage : ville -> coordonnées GPS
+    # =========================
+    # 2. Géocodage
+    # =========================
+
     coords = obtenir_coordonnees(lieu)
 
     if not coords:
@@ -82,7 +89,7 @@ def meteo_depuis_texte(payload: MeteoTexteRequest) -> dict:
             texte_brut=texte,
             lieu_detecte=lieu,
             horizon=horizon,
-            service_stt="mock",
+            service_stt="web_speech",
             statut="lieu_introuvable"
         ))
 
@@ -91,17 +98,23 @@ def meteo_depuis_texte(payload: MeteoTexteRequest) -> dict:
             detail=f"Lieu introuvable : {lieu}"
         )
 
+    latitude = coords["latitude"]
+    longitude = coords["longitude"]
+
+    # =========================
     # 3. Appel API météo
-    meteo = obtenir_meteo(coords["latitude"], coords["longitude"])
+    # =========================
+
+    meteo = obtenir_meteo(latitude, longitude)
 
     if not meteo:
         save_requete(RequeteMeteoCreate(
             texte_brut=texte,
             lieu_detecte=coords["nom"],
             horizon=horizon,
-            latitude=coords["latitude"],
-            longitude=coords["longitude"],
-            service_stt="mock",
+            latitude=latitude,
+            longitude=longitude,
+            service_stt="web_speech",
             statut="error"
         ))
 
@@ -110,10 +123,16 @@ def meteo_depuis_texte(payload: MeteoTexteRequest) -> dict:
             detail="Erreur lors de l'appel à l'API météo."
         )
 
-    # 4. Conversion horizon -> index de jour
+    # =========================
+    # 4. Extraction du bon jour
+    # =========================
+
     index_jour = horizon_to_index(horizon)
 
-    donnees_jour = extraire_donnees_jour(meteo, index=index_jour)
+    donnees_jour = extraire_donnees_jour(
+        meteo=meteo,
+        index=index_jour
+    )
 
     if not donnees_jour:
         raise HTTPException(
@@ -121,22 +140,28 @@ def meteo_depuis_texte(payload: MeteoTexteRequest) -> dict:
             detail="Impossible d'extraire les données météo du jour demandé."
         )
 
+    # =========================
     # 5. Sauvegarde en base
+    # =========================
+
     save_requete(RequeteMeteoCreate(
         texte_brut=texte,
         lieu_detecte=coords["nom"],
         horizon=horizon,
-        latitude=coords["latitude"],
-        longitude=coords["longitude"],
+        latitude=latitude,
+        longitude=longitude,
         temp_max=donnees_jour["temp_max"],
         temp_min=donnees_jour["temp_min"],
         description=donnees_jour["description"],
         code_meteo=donnees_jour["code_meteo"],
-        service_stt="mock",
+        service_stt="web_speech",
         statut="success"
     ))
 
-    # 6. Réponse API
+    # =========================
+    # 6. Réponse API complète
+    # =========================
+
     return {
         "statut": "ok",
         "texte": texte,
@@ -144,5 +169,10 @@ def meteo_depuis_texte(payload: MeteoTexteRequest) -> dict:
         "pays": coords["pays"],
         "horizon": horizon,
         "index_jour": index_jour,
+
+        # Important pour la carte Streamlit
+        "latitude": latitude,
+        "longitude": longitude,
+
         "meteo": donnees_jour
     }
