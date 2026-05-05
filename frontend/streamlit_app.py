@@ -12,6 +12,8 @@ Fonctionnalités :
 - Graphiques météo sur 7 jours avec Plotly
 - Réponse vocale automatique
 - Historique des recherches
+- Feedback utilisateur 👍 / 👎
+- Dashboard feedback utilisateurs
 """
 
 from datetime import datetime
@@ -76,6 +78,15 @@ div[data-testid="stBokehChart"] {
     margin-bottom: 0;
 }
 
+.feedback-box {
+    background-color: #111827;
+    padding: 1rem;
+    border-radius: 14px;
+    border: 1px solid #374151;
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+}
+
 .small-muted {
     color: #9ca3af;
     font-size: 0.9rem;
@@ -91,11 +102,6 @@ div[data-testid="stBokehChart"] {
 def lire_reponse_orale(texte: str) -> None:
     """
     Lit une réponse à voix haute dans le navigateur.
-
-    Utilise SpeechSynthesis :
-    - gratuit
-    - intégré à Chrome / Edge
-    - aucune clé API nécessaire
     """
 
     components.html(
@@ -116,15 +122,148 @@ def lire_reponse_orale(texte: str) -> None:
 
 
 # =========================
+# FEEDBACK UTILISATEUR
+# =========================
+
+def envoyer_feedback(requete_id: int, feedback: str) -> None:
+    """
+    Envoie le feedback utilisateur à l'API.
+
+    feedback :
+    - "up"   -> résultat utile
+    - "down" -> résultat non utile
+    """
+
+    try:
+        response = requests.post(
+            f"{API_URL}/feedback",
+            json={
+                "requete_id": requete_id,
+                "feedback": feedback,
+            },
+            timeout=10,
+        )
+
+        if response.status_code == 200:
+            if feedback == "up":
+                st.success("👍 Merci pour votre retour !")
+            else:
+                st.info("👎 Merci, votre retour aidera à améliorer l'application.")
+        else:
+            st.error("Erreur lors de l'envoi du feedback.")
+
+    except requests.RequestException:
+        st.error("Impossible d'envoyer le feedback.")
+
+
+def afficher_feedback(requete_id: int | None) -> None:
+    """
+    Affiche les boutons 👍 / 👎 sous un résultat météo.
+    """
+
+    if not requete_id:
+        return
+
+    st.markdown("""
+    <div class="feedback-box">
+        <h3>Votre avis</h3>
+        <p class="small-muted">Ce résultat météo vous semble-t-il utile ?</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_up, col_down = st.columns(2)
+
+    with col_up:
+        if st.button("👍 Utile", key=f"feedback_up_{requete_id}"):
+            envoyer_feedback(requete_id, "up")
+
+    with col_down:
+        if st.button("👎 Pas utile", key=f"feedback_down_{requete_id}"):
+            envoyer_feedback(requete_id, "down")
+
+
+# =========================
+# DASHBOARD FEEDBACK
+# =========================
+
+def afficher_dashboard_feedback() -> None:
+    """
+    Affiche les statistiques des feedbacks utilisateurs.
+
+    Données utilisées :
+    - nombre de feedbacks positifs 👍
+    - nombre de feedbacks négatifs 👎
+    - total de feedbacks
+    - taux de satisfaction
+
+    Source :
+    GET /api/v1/feedback/stats
+    """
+
+    st.subheader("📊 Feedback utilisateurs")
+
+    try:
+        response = requests.get(
+            f"{API_URL}/feedback/stats",
+            timeout=5,
+        )
+
+        if response.status_code != 200:
+            st.warning("Impossible de charger les statistiques feedback.")
+            return
+
+        stats = response.json().get("stats", {})
+
+        positifs = stats.get("positifs", 0)
+        negatifs = stats.get("negatifs", 0)
+        total = stats.get("total", 0)
+        taux = stats.get("taux_satisfaction", 0.0)
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric("👍", positifs)
+        col2.metric("👎", negatifs)
+        col3.metric("⭐", f"{taux}%")
+
+        if total == 0:
+            st.info("Aucun feedback pour le moment.")
+            return
+
+        fig_feedback = go.Figure(
+            data=[
+                go.Pie(
+                    labels=["👍 Positif", "👎 Négatif"],
+                    values=[positifs, negatifs],
+                    hole=0.45,
+                    marker=dict(
+                        colors=["#22c55e", "#ef4444"]
+                    ),
+                    textinfo="label+percent",
+                    hovertemplate="%{label}<br>%{value} feedback(s)<extra></extra>",
+                )
+            ]
+        )
+
+        fig_feedback.update_layout(
+            template="plotly_dark",
+            height=260,
+            margin=dict(l=10, r=10, t=20, b=10),
+            showlegend=False,
+        )
+
+        st.plotly_chart(fig_feedback, use_container_width=True)
+
+    except requests.RequestException:
+        st.warning("API feedback indisponible.")
+
+
+# =========================
 # CARTE GÉOGRAPHIQUE
 # =========================
 
 def afficher_carte(latitude: float, longitude: float, lieu: str) -> None:
     """
     Affiche une carte Folium centrée sur la ville détectée.
-
-    On utilise components.html() au lieu de st_folium()
-    pour éviter les erreurs de sérialisation JSON.
     """
 
     carte = folium.Map(
@@ -151,12 +290,6 @@ def afficher_carte(latitude: float, longitude: float, lieu: str) -> None:
 def afficher_graphiques_7_jours(previsions: list[dict]) -> None:
     """
     Affiche les prévisions météo sur 7 jours avec Plotly.
-
-    Améliorations :
-    - tooltips enrichis
-    - grille douce
-    - ligne moyenne température max
-    - barres de pluie lisibles
     """
 
     if not previsions:
@@ -175,10 +308,6 @@ def afficher_graphiques_7_jours(previsions: list[dict]) -> None:
     moyenne_temp_max = sum(temp_max) / len(temp_max)
 
     st.subheader("📊 Prévisions sur 7 jours")
-
-    # -------------------------
-    # Graphique températures
-    # -------------------------
 
     fig_temp = go.Figure()
 
@@ -225,9 +354,7 @@ def afficher_graphiques_7_jours(previsions: list[dict]) -> None:
             xanchor="right",
             x=1,
         ),
-        xaxis=dict(
-            showgrid=False,
-        ),
+        xaxis=dict(showgrid=False),
         yaxis=dict(
             showgrid=True,
             gridcolor="rgba(255,255,255,0.12)",
@@ -235,10 +362,6 @@ def afficher_graphiques_7_jours(previsions: list[dict]) -> None:
     )
 
     st.plotly_chart(fig_temp, use_container_width=True)
-
-    # -------------------------
-    # Graphique précipitations
-    # -------------------------
 
     fig_rain = go.Figure()
 
@@ -259,9 +382,7 @@ def afficher_graphiques_7_jours(previsions: list[dict]) -> None:
         template="plotly_dark",
         height=380,
         margin=dict(l=20, r=20, t=60, b=30),
-        xaxis=dict(
-            showgrid=False,
-        ),
+        xaxis=dict(showgrid=False),
         yaxis=dict(
             showgrid=True,
             gridcolor="rgba(255,255,255,0.12)",
@@ -296,12 +417,7 @@ def badge_meteo(description: str | None) -> str:
 
 def afficher_resultat(data: dict) -> None:
     """
-    Affiche les données météo retournées par l'API :
-    - résumé météo
-    - badge météo
-    - carte
-    - graphiques 7 jours
-    - réponse orale
+    Affiche les données météo retournées par l'API.
     """
 
     meteo = data["meteo"]
@@ -339,6 +455,8 @@ def afficher_resultat(data: dict) -> None:
         data.get("previsions_7_jours", [])
     )
 
+    afficher_feedback(data.get("requete_id"))
+
     phrase_orale = (
         f"La météo pour {data['lieu']} {data['horizon']} est : "
         f"{description}. "
@@ -369,7 +487,6 @@ def afficher_erreur_api(response: requests.Response) -> None:
 def appeler_api_meteo(texte: str) -> None:
     """
     Envoie une phrase météo à l'endpoint /meteo.
-    Affiche une progression pour améliorer l'expérience utilisateur.
     """
 
     if not texte.strip():
@@ -451,10 +568,6 @@ with col_main:
         ["📝 Texte", "🎧 Fichier audio", "🎤 Micro"]
     )
 
-    # -------------------------
-    # TEXTE
-    # -------------------------
-
     with tab_texte:
         texte = st.text_input(
             "Votre question météo",
@@ -464,10 +577,6 @@ with col_main:
 
         if st.button("Obtenir la météo", type="primary", key="btn_texte"):
             appeler_api_meteo(texte)
-
-    # -------------------------
-    # FICHIER AUDIO
-    # -------------------------
 
     with tab_audio:
         st.info(
@@ -486,10 +595,6 @@ with col_main:
 
             if st.button("Analyser l'audio", type="primary", key="btn_audio"):
                 appeler_api_audio(fichier_audio)
-
-    # -------------------------
-    # MICRO
-    # -------------------------
 
     with tab_micro:
         st.info("Fonctionne principalement avec Chrome / Edge.")
@@ -569,6 +674,8 @@ with col_main:
 # =========================
 
 with col_history:
+    afficher_dashboard_feedback()
+
     st.subheader("📜 Historique")
 
     if st.button("Actualiser", key="btn_historique"):
@@ -593,15 +700,24 @@ with col_history:
                 )
 
                 for item in historique_trie[:10]:
+                    feedback_label = ""
+                    if item.get("feedback") == "up":
+                        feedback_label = " 👍"
+                    elif item.get("feedback") == "down":
+                        feedback_label = " 👎"
+
                     titre = (
                         f"{item.get('lieu_detecte') or '?'} "
-                        f"— {item.get('horizon')}"
+                        f"— {item.get('horizon')}{feedback_label}"
                     )
 
                     with st.expander(titre):
                         st.write(f"**Texte :** {item.get('texte_brut')}")
                         st.write(f"**Date :** {item.get('timestamp')}")
                         st.write(f"**Statut :** {item.get('statut')}")
+
+                        if item.get("feedback"):
+                            st.write(f"**Feedback :** {item.get('feedback')}")
 
                         if item.get("description"):
                             st.write(f"**Météo :** {item.get('description')}")
