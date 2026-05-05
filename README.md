@@ -234,9 +234,36 @@ Interface : http://localhost:8501
 
 ## 🧪 Tests
 
+Le projet dispose d'une suite de tests unitaires et d'intégration.
+
 ```bash
 pytest tests/ -v
 ```
+Avec couverture :
+pytest --cov=app --cov-report=term-missing
+
+### Résultat actuel :
+✅ 68 passed
+Coverage total : 98%
+
+### Types de tests
+Unit tests
+NLU (regex)
+Weather service (API mockée)
+STT (mock + OpenAI simulé)
+Integration tests
+API FastAPI (/meteo, /feedback, /health, etc.)
+Pipeline complet texte et audio
+Database tests
+SQLite avec base temporaire isolée
+Bonnes pratiques
+Aucun appel réseau réel pendant les tests
+Utilisation de monkeypatch pour mocker :
+Open-Meteo
+OpenAI
+SQLite
+
+
 
 ---
 
