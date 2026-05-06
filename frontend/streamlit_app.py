@@ -470,6 +470,8 @@ def afficher_resultat(data: dict) -> None:
         f"{description}. "
         f"La température maximale est de {meteo.get('temp_max')} degrés, "
         f"et la température minimale est de {meteo.get('temp_min')} degrés."
+        f"Les précipitations sont de {meteo.get('precipitation')} millimètres. "
+         f"Le vent maximal est de {meteo.get('vent_max')} kilomètres par heure."
     )
 
     lire_reponse_orale(phrase_orale)
