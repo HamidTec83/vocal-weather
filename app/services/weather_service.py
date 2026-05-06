@@ -3,16 +3,14 @@ weather_service.py
 
 Contient toute la logique liée à la météo :
 
-1. Transformer un nom de ville en coordonnées GPS
+1. Transformer un nom de ville ou un code postal en coordonnées GPS
 2. Appeler l'API Open-Meteo
-3. Extraire les données utiles pour un jour précis
-4. Transformer les codes météo WMO en descriptions lisibles
-
-API utilisée :
-- Géocodage : https://geocoding-api.open-meteo.com
-- Météo     : https://api.open-meteo.com
+3. Extraire les données météo d'un jour précis
+4. Extraire les prévisions météo sur 7 jours
+5. Transformer les codes météo WMO en descriptions lisibles
 """
 
+import re
 import requests
 
 
@@ -20,9 +18,6 @@ import requests
 # Codes météo WMO
 # =========================
 
-# Open-Meteo renvoie des codes météo numériques.
-# Exemple : 0 = ciel dégagé, 61 = pluie légère.
-# Ce dictionnaire permet d'afficher une description compréhensible.
 CODES_METEO = {
     0: "Ciel dégagé ☀️",
     1: "Principalement dégagé 🌤️",
@@ -49,14 +44,94 @@ CODES_METEO = {
 
 
 # =========================
-# Géocodage : ville -> GPS
+# Helpers
+# =========================
+
+def est_code_postal_francais(lieu: str) -> bool:
+    """
+    Vérifie si la valeur ressemble à un code postal français.
+
+    Exemples valides :
+    - 75018
+    - 69003
+    - 13001
+    - 37000
+    """
+
+    return bool(re.fullmatch(r"\d{5}", lieu.strip()))
+
+
+def obtenir_coordonnees_par_code_postal(code_postal: str) -> dict | None:
+    """
+    Transforme un code postal français en coordonnées GPS.
+
+    Utilise l'API officielle geo.api.gouv.fr.
+
+    Exemple :
+    "75018" devient environ :
+    {
+        "nom": "Paris",
+        "latitude": 48.8927,
+        "longitude": 2.3487,
+        "pays": "France"
+    }
+
+    Retourne None si :
+    - le code postal est introuvable
+    - l'API est inaccessible
+    - une erreur réseau survient
+    """
+
+    url = "https://geo.api.gouv.fr/communes"
+
+    params = {
+        "codePostal": code_postal,
+        "fields": "nom,centre,codesPostaux",
+        "format": "json",
+        "geometry": "centre",
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+
+        data = response.json()
+
+        if not data:
+            return None
+
+        commune = data[0]
+
+        centre = commune.get("centre", {})
+        coordinates = centre.get("coordinates", [])
+
+        if len(coordinates) != 2:
+            return None
+
+        longitude = coordinates[0]
+        latitude = coordinates[1]
+
+        return {
+            "nom": commune.get("nom", code_postal),
+            "latitude": latitude,
+            "longitude": longitude,
+            "pays": "France",
+        }
+
+    except requests.RequestException as e:
+        print(f"Erreur géocodage code postal : {e}")
+        return None
+
+
+# =========================
+# Géocodage : ville/code postal -> GPS
 # =========================
 
 def obtenir_coordonnees(lieu: str) -> dict | None:
     """
-    Transforme un nom de ville en coordonnées GPS.
+    Transforme un nom de ville ou un code postal en coordonnées GPS.
 
-    Exemple :
+    Exemples :
     "Paris" devient :
     {
         "nom": "Paris",
@@ -65,31 +140,43 @@ def obtenir_coordonnees(lieu: str) -> dict | None:
         "pays": "France"
     }
 
+    "75018" devient :
+    {
+        "nom": "Paris",
+        "latitude": ...,
+        "longitude": ...,
+        "pays": "France"
+    }
+
     Retourne None si :
-    - la ville n'est pas trouvée
+    - le lieu n'est pas trouvé
     - l'API est inaccessible
     - une erreur réseau survient
     """
 
+    lieu = lieu.strip()
+
+    # Si l'utilisateur donne un code postal français,
+    # on utilise l'API officielle française.
+    if est_code_postal_francais(lieu):
+        return obtenir_coordonnees_par_code_postal(lieu)
+
+    # Sinon, on utilise Open-Meteo pour géocoder un nom de ville.
     url = "https://geocoding-api.open-meteo.com/v1/search"
 
     params = {
         "name": lieu,
         "count": 1,
         "language": "fr",
-        "format": "json"
+        "format": "json",
     }
 
     try:
-        # timeout=10 évite que l'application reste bloquée trop longtemps
         response = requests.get(url, params=params, timeout=10)
-
-        # Déclenche une erreur si le statut HTTP est 4xx ou 5xx
         response.raise_for_status()
 
         data = response.json()
 
-        # Si Open-Meteo ne trouve aucune ville
         if not data.get("results"):
             return None
 
@@ -99,12 +186,10 @@ def obtenir_coordonnees(lieu: str) -> dict | None:
             "nom": result["name"],
             "latitude": result["latitude"],
             "longitude": result["longitude"],
-            "pays": result.get("country", "")
+            "pays": result.get("country", ""),
         }
 
     except requests.RequestException as e:
-        # Pour un prototype, print suffit.
-        # Plus tard, on pourra remplacer par logging.
         print(f"Erreur géocodage : {e}")
         return None
 
@@ -119,11 +204,6 @@ def obtenir_meteo(latitude: float, longitude: float) -> dict | None:
     pour une latitude et une longitude données.
 
     Retourne le JSON complet de l'API Open-Meteo.
-
-    Retourne None si :
-    - l'API est inaccessible
-    - une erreur HTTP survient
-    - une erreur réseau survient
     """
 
     url = "https://api.open-meteo.com/v1/forecast"
@@ -132,23 +212,17 @@ def obtenir_meteo(latitude: float, longitude: float) -> dict | None:
         "latitude": latitude,
         "longitude": longitude,
 
-        # Données journalières nécessaires pour le projet
         "daily": [
             "temperature_2m_max",
             "temperature_2m_min",
             "precipitation_sum",
             "weathercode",
-            "windspeed_10m_max"
+            "windspeed_10m_max",
         ],
 
-        # Données météo actuelles
         "current_weather": True,
-
-        # Fuseau horaire français
         "timezone": "Europe/Paris",
-
-        # Prévisions sur 7 jours
-        "forecast_days": 7
+        "forecast_days": 7,
     }
 
     try:
@@ -177,20 +251,7 @@ def extraire_donnees_jour(meteo: dict, index: int = 0) -> dict | None:
     - ...
     - 6 = dans 6 jours
 
-    Retourne :
-    {
-        "temp_max": 22.4,
-        "temp_min": 14.1,
-        "precipitation": 0.2,
-        "vent_max": 18.5,
-        "code_meteo": 2,
-        "description": "Partiellement nuageux ⛅"
-    }
-
-    Retourne None si :
-    - meteo est vide
-    - l'index demandé est invalide
-    - les données journalières sont absentes
+    Retourne None si les données sont absentes ou invalides.
     """
 
     if not meteo:
@@ -204,7 +265,6 @@ def extraire_donnees_jour(meteo: dict, index: int = 0) -> dict | None:
     vents_max = daily.get("windspeed_10m_max", [])
     codes = daily.get("weathercode", [])
 
-    # Sécurité : évite IndexError si l'index n'existe pas
     if index < 0 or index >= len(temperatures_max):
         return None
 
@@ -216,5 +276,47 @@ def extraire_donnees_jour(meteo: dict, index: int = 0) -> dict | None:
         "precipitation": precipitations[index] if index < len(precipitations) else None,
         "vent_max": vents_max[index] if index < len(vents_max) else None,
         "code_meteo": code,
-        "description": CODES_METEO.get(code, "Conditions inconnues")
+        "description": CODES_METEO.get(code, "Conditions inconnues"),
     }
+
+
+# =========================
+# Prévisions 7 jours
+# =========================
+
+def extraire_previsions_7_jours(meteo: dict) -> list[dict]:
+    """
+    Extrait les prévisions météo sur 7 jours.
+
+    Objectif :
+    fournir une liste simple exploitable par Streamlit / Plotly.
+    """
+
+    if not meteo:
+        return []
+
+    daily = meteo.get("daily", {})
+
+    dates = daily.get("time", [])
+    temperatures_max = daily.get("temperature_2m_max", [])
+    temperatures_min = daily.get("temperature_2m_min", [])
+    precipitations = daily.get("precipitation_sum", [])
+    vents_max = daily.get("windspeed_10m_max", [])
+    codes = daily.get("weathercode", [])
+
+    previsions = []
+
+    for index, date in enumerate(dates):
+        code = codes[index] if index < len(codes) else None
+
+        previsions.append({
+            "date": date,
+            "temp_max": temperatures_max[index] if index < len(temperatures_max) else None,
+            "temp_min": temperatures_min[index] if index < len(temperatures_min) else None,
+            "precipitation": precipitations[index] if index < len(precipitations) else None,
+            "vent_max": vents_max[index] if index < len(vents_max) else None,
+            "code_meteo": code,
+            "description": CODES_METEO.get(code, "Conditions inconnues"),
+        })
+
+    return previsions

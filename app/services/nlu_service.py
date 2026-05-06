@@ -9,13 +9,22 @@ Objectif :
 - Comprendre une phrase utilisateur
 - Extraire le lieu demandé
 - Extraire l'horizon temporel
+- Détecter aussi un code postal français
 
-Exemple :
+Exemples :
 "Quel temps fera-t-il à Paris demain ?"
 
 Devient :
 {
     "lieu": "Paris",
+    "horizon": "demain"
+}
+
+"Météo à 75018 demain"
+
+Devient :
+{
+    "lieu": "75018",
     "horizon": "demain"
 }
 """
@@ -28,7 +37,7 @@ def extraire_intention(texte: str) -> dict:
     Extrait le lieu et l'horizon temporel depuis un texte.
 
     Paramètre :
-    - texte : phrase transcrite depuis la voix
+    - texte : phrase utilisateur ou phrase transcrite depuis la voix
 
     Retour :
     {
@@ -37,20 +46,14 @@ def extraire_intention(texte: str) -> dict:
     }
     """
 
-    # Normalisation du texte :
-    # - minuscules
-    # - suppression des espaces au début et à la fin
     texte_lower = texte.lower().strip()
 
     # =========================
     # Extraction de l'horizon
     # =========================
 
-    # Valeur par défaut si l'utilisateur ne précise rien.
     horizon = "aujourd'hui"
 
-    # Important : tester "après-demain" AVANT "demain"
-    # car "après-demain" contient le mot "demain".
     if "après-demain" in texte_lower or "apres-demain" in texte_lower:
         horizon = "j+2"
 
@@ -60,8 +63,6 @@ def extraire_intention(texte: str) -> dict:
     elif "semaine" in texte_lower or "7 jours" in texte_lower:
         horizon = "semaine"
 
-    # Exemple :
-    # "dans 3 jours" -> "j+3"
     elif match := re.search(r"dans (\d+) jours?", texte_lower):
         horizon = f"j+{match.group(1)}"
 
@@ -71,41 +72,46 @@ def extraire_intention(texte: str) -> dict:
 
     lieu = None
 
-    # Cherche un lieu après des mots fréquents :
-    # "à Paris", "a Lyon", "pour Bordeaux", "près de Lille", etc.
-    match_lieu = re.search(
-        r"(?:à|a|sur|pour|en|de|près de|pres de)\s+([a-zà-öø-ÿ\- ]+)",
-        texte_lower
-    )
+    # 1. Priorité au code postal français : 5 chiffres
+    # Exemples : 75018, 69003, 13001, 37000
+    match_code_postal = re.search(r"\b\d{5}\b", texte_lower)
 
-    if match_lieu:
-        brut = match_lieu.group(1).strip()
+    if match_code_postal:
+        lieu = match_code_postal.group(0)
 
-        # Mots qui indiquent que le nom du lieu est terminé.
-        stop_words = [
-            "demain",
-            "après-demain",
-            "apres-demain",
-            "dans",
-            "jour",
-            "jours",
-            "semaine",
-            "aujourd'hui"
-        ]
+    else:
+        # 2. Sinon, extraction classique d'un nom de ville
+        match_lieu = re.search(
+            r"(?:à|a|sur|pour|en|de|près de|pres de)\s+([a-zà-öø-ÿ\- ]+)",
+            texte_lower
+        )
 
-        mots = brut.split()
+        if match_lieu:
+            brut = match_lieu.group(1).strip()
 
-        lieu_mots = []
+            stop_words = [
+                "demain",
+                "après-demain",
+                "apres-demain",
+                "dans",
+                "jour",
+                "jours",
+                "semaine",
+                "aujourd'hui",
+                "cette",
+            ]
 
-        # On ajoute les mots un par un jusqu'à rencontrer un mot temporel.
-        for mot in mots:
-            if mot in stop_words:
-                break
+            mots = brut.split()
+            lieu_mots = []
 
-            lieu_mots.append(mot)
+            for mot in mots:
+                if mot in stop_words:
+                    break
 
-        if lieu_mots:
-            lieu = " ".join(lieu_mots).title()
+                lieu_mots.append(mot)
+
+            if lieu_mots:
+                lieu = " ".join(lieu_mots).title()
 
     return {
         "lieu": lieu,
@@ -139,8 +145,6 @@ def horizon_to_index(horizon: str) -> int:
     if horizon.startswith("j+"):
         try:
             index = int(horizon[2:])
-
-            # Sécurité : forecast_days=7 donne les index 0 à 6.
             return min(index, 6)
 
         except ValueError:

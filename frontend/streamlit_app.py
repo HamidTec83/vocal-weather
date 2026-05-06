@@ -15,7 +15,7 @@ Fonctionnalités :
 - Feedback utilisateur 👍 / 👎
 - Dashboard feedback utilisateurs
 """
-
+import os
 from datetime import datetime
 
 import folium
@@ -32,7 +32,15 @@ from streamlit_bokeh_events import streamlit_bokeh_events
 # CONFIGURATION
 # =========================
 
-API_URL = "http://127.0.0.1:8000/api/v1"
+#API_URL = "http://127.0.0.1:8000/api/v1"
+
+# URL du backend FastAPI.
+# En local : http://127.0.0.1:8000/api/v1
+# En Docker : http://backend:8000/api/v1
+API_URL = os.getenv(
+    "API_URL",
+    "http://127.0.0.1:8000/api/v1"
+)
 
 st.set_page_config(
     page_title="Vocal Weather",

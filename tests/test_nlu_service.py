@@ -14,12 +14,15 @@ from app.services.nlu_service import extraire_intention, horizon_to_index
         ("Météo à Lyon demain", "Lyon", "demain"),
         ("Quel temps fera-t-il à Marseille après-demain ?", "Marseille", "j+2"),
         ("Prévision pour Bordeaux apres-demain", "Bordeaux", "j+2"),
-        ("Météo sur Lille cette semaine", "Lille Cette", "semaine"),
+        ("Météo sur Lille cette semaine", "Lille", "semaine"),
         ("Prévisions à Nantes dans 3 jours", "Nantes", "j+3"),
         ("Temps près de Toulouse demain", "Toulouse", "demain"),
         ("Météo pres de Rennes dans 5 jours", "Rennes", "j+5"),
         ("Quel temps à Saint-Malo demain ?", "Saint-Malo", "demain"),
        ("Météo à Aix en Provence demain", "Aix En Provence", "demain"),
+       ("Météo à 75018 demain", "75018", "demain"),
+       ("Quel temps fait-il aujourd'hui à 37000 ?", "37000", "aujourd'hui"),
+        ("Prévisions pour 69003 dans 3 jours", "69003", "j+3"),
     ],
 )
 def test_extraire_intention_lieu_et_horizon(texte, lieu_attendu, horizon_attendu):

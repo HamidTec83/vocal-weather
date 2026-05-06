@@ -2,6 +2,8 @@ import pytest
 import requests
 
 from app.services.weather_service import (
+    est_code_postal_francais,
+    obtenir_coordonnees_par_code_postal,
     obtenir_coordonnees,
     obtenir_meteo,
     extraire_donnees_jour,
@@ -46,6 +48,97 @@ class FakeResponse:
     def raise_for_status(self):
         if self.status_error:
             raise requests.RequestException("Erreur HTTP simulée")
+
+
+# =========================
+# Tests code postal
+# =========================
+
+def test_est_code_postal_francais_valide():
+    assert est_code_postal_francais("75018") is True
+    assert est_code_postal_francais("37000") is True
+    assert est_code_postal_francais("69003") is True
+
+
+def test_est_code_postal_francais_invalide():
+    assert est_code_postal_francais("Paris") is False
+    assert est_code_postal_francais("7501") is False
+    assert est_code_postal_francais("750180") is False
+    assert est_code_postal_francais("75A18") is False
+
+
+def test_obtenir_coordonnees_par_code_postal_succes(monkeypatch):
+    def fake_get(url, params, timeout):
+        assert url == "https://geo.api.gouv.fr/communes"
+        assert params["codePostal"] == "75018"
+        assert params["geometry"] == "centre"
+
+        return FakeResponse([
+            {
+                "nom": "Paris",
+                "centre": {
+                    "coordinates": [2.3487, 48.8927]
+                },
+                "codesPostaux": ["75018"],
+            }
+        ])
+
+    monkeypatch.setattr("requests.get", fake_get)
+
+    resultat = obtenir_coordonnees_par_code_postal("75018")
+
+    assert resultat == {
+        "nom": "Paris",
+        "latitude": 48.8927,
+        "longitude": 2.3487,
+        "pays": "France",
+    }
+
+
+def test_obtenir_coordonnees_par_code_postal_introuvable(monkeypatch):
+    def fake_get(url, params, timeout):
+        return FakeResponse([])
+
+    monkeypatch.setattr("requests.get", fake_get)
+
+    resultat = obtenir_coordonnees_par_code_postal("99999")
+
+    assert resultat is None
+
+
+def test_obtenir_coordonnees_par_code_postal_erreur_reseau(monkeypatch):
+    def fake_get(url, params, timeout):
+        raise requests.RequestException("Erreur réseau simulée")
+
+    monkeypatch.setattr("requests.get", fake_get)
+
+    resultat = obtenir_coordonnees_par_code_postal("75018")
+
+    assert resultat is None
+
+
+def test_obtenir_coordonnees_utilise_code_postal(monkeypatch):
+    def fake_obtenir_coordonnees_par_code_postal(code_postal):
+        assert code_postal == "75018"
+
+        return {
+            "nom": "Paris",
+            "latitude": 48.8927,
+            "longitude": 2.3487,
+            "pays": "France",
+        }
+
+    monkeypatch.setattr(
+        "app.services.weather_service.obtenir_coordonnees_par_code_postal",
+        fake_obtenir_coordonnees_par_code_postal
+    )
+
+    resultat = obtenir_coordonnees("75018")
+
+    assert resultat["nom"] == "Paris"
+    assert resultat["latitude"] == 48.8927
+    assert resultat["longitude"] == 2.3487
+    assert resultat["pays"] == "France"
 
 
 # =========================
