@@ -311,7 +311,7 @@ def meteo_depuis_texte(request: Request, payload: MeteoTexteRequest) -> dict:
         horizon=horizon_sauvegarde,
         latitude=latitude,
         longitude=longitude,
-        temp_max=donnees_meteo.get("temp_max"),
+        temp_max=donnees_meteo.get("temp_max") or donnees_meteo.get("temp"),
         temp_min=donnees_meteo.get("temp_min"),
         description=donnees_meteo["description"],
         code_meteo=donnees_meteo["code_meteo"],

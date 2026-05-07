@@ -28,7 +28,7 @@ def extraire_heure(texte_lower: str) -> int | None:
     """
 
     # On accepte aussi le format compact "20h"
-    match = re.search(r"\b([01]?\d|2[0-3])\s*(?:h|heure|heures)?\b", texte_lower)
+    match = re.search(r"\b([01]?\d|2[0-3])\s*(?:h(?:eure[s]?)?)\b", texte_lower)
     if not match:
         return None
 

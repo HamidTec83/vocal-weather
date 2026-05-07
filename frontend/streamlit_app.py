@@ -426,24 +426,47 @@ def badge_meteo(description: str | None) -> str:
 def afficher_resultat(data: dict) -> None:
     """
     Affiche les données météo retournées par l'API.
+
+    Gère deux cas :
+    - météo journalière : temp_max / temp_min
+    - météo horaire : temperature / humidité / vent / pluie
     """
 
     meteo = data["meteo"]
     description = meteo.get("description", "")
-    type_meteo = meteo.get("type", "daily")  # ← ligne manquante
 
-    st.success(f"📍 {data['lieu']} — horizon : {data['horizon']}")
+    # Le backend renvoie normalement "daily" ou "hourly"
+    type_meteo = meteo.get("type", "daily")
+
+    heure = data.get("heure")
+
+    if type_meteo == "hourly" and heure is not None:
+        st.success(f"📍 {data['lieu']} — météo à {heure}h")
+    else:
+        st.success(f"📍 {data['lieu']} — horizon : {data['horizon']}")
 
     col1, col2, col3, col4 = st.columns(4)
 
     if type_meteo == "hourly":
+        # -------------------------
         # Affichage météo horaire
-        col1.metric("🌡️ Température", f"{meteo.get('temp')} °C")
-        col2.metric("💧 Humidité", f"{meteo.get('humidite')} %")
-        col3.metric("🌧️ Pluie", f"{meteo.get('precipitation')} mm")
-        col4.metric("💨 Vent", f"{meteo.get('vent')} km/h")
+        # -------------------------
+
+        temperature = meteo.get("temp")
+        humidite = meteo.get("humidite")
+        precipitation = meteo.get("precipitation")
+        vent = meteo.get("vent")
+
+        col1.metric("🌡️ Température", f"{temperature} °C")
+        col2.metric("💧 Humidité", f"{humidite} %")
+        col3.metric("🌧️ Pluie", f"{precipitation} mm")
+        col4.metric("💨 Vent", f"{vent} km/h")
+
     else:
+        # -------------------------
         # Affichage météo journalière
+        # -------------------------
+
         col1.metric("🌡️ Temp. max", f"{meteo.get('temp_max')} °C")
         col2.metric("❄️ Temp. min", f"{meteo.get('temp_min')} °C")
         col3.metric("🌧️ Pluie", f"{meteo.get('precipitation')} mm")
@@ -476,7 +499,7 @@ def afficher_resultat(data: dict) -> None:
 
     if type_meteo == "hourly":
         phrase_orale = (
-            f"La météo pour {data['lieu']} à {meteo.get('heure')} est : "
+            f"La météo pour {data['lieu']} à {heure} heures est : "
             f"{description}. "
             f"La température est de {meteo.get('temp')} degrés. "
             f"Le vent est de {meteo.get('vent')} kilomètres par heure."
@@ -746,8 +769,12 @@ with col_history:
 
                         if item.get("description"):
                             st.write(f"**Météo :** {item.get('description')}")
-                            st.write(f"**Temp. max :** {item.get('temp_max')} °C")
-                            st.write(f"**Temp. min :** {item.get('temp_min')} °C")
+                            if item.get("temp_max") is not None:
+                             st.write(f"**Temp. max :** {item.get('temp_max')} °C")
+                             if item.get("temp_min") is not None:
+                                 st.write(f"**Temp. min :** {item.get('temp_min')} °C")
+                        else:
+                            st.write(f"**Température :** {item.get('temp_max') or '—'} °C")
 
         else:
             st.warning("Impossible de charger l'historique.")

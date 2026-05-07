@@ -374,6 +374,10 @@ def extraire_donnees_heure(meteo: dict, index_jour: int, heure: int) -> dict | N
         return None
 
     code = codes[index_heure] if index_heure < len(codes) else None
+    # Juste avant le return
+    print(f"DEBUG timestamp: {timestamp_cible}")
+    print(f"DEBUG index_heure: {index_heure}")
+    print(f"DEBUG temp: {temperatures[index_heure] if index_heure < len(temperatures) else 'OUT OF RANGE'}")
 
     return {
         # Ce champ permet au frontend de savoir qu'on parle d'une météo horaire
