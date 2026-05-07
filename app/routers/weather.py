@@ -28,6 +28,7 @@ from app.services.weather_service import (
     obtenir_coordonnees,
     obtenir_meteo,
     extraire_donnees_jour,
+    extraire_donnees_heure,
     extraire_previsions_7_jours,
 )
 
@@ -153,10 +154,12 @@ def meteo_depuis_texte(request: Request, payload: MeteoTexteRequest) -> dict:
     - 10 requêtes par minute par IP
 
     Étapes :
-    1. Extraire l'intention : lieu + horizon
+    1. Extraire l'intention : lieu + horizon + heure éventuelle
     2. Convertir le lieu en coordonnées GPS
     3. Récupérer la météo avec Open-Meteo
-    4. Extraire le bon jour selon l'horizon
+    4. Extraire soit :
+       - la météo journalière
+       - la météo horaire
     5. Extraire les prévisions météo sur 7 jours
     6. Sauvegarder la requête en base SQLite
     7. Retourner une réponse complète au frontend
@@ -169,13 +172,17 @@ def meteo_depuis_texte(request: Request, payload: MeteoTexteRequest) -> dict:
     texte = payload.texte
 
     # =========================
-    # 1. NLU : lieu + horizon
+    # 1. NLU : lieu + horizon + heure
     # =========================
 
     intention = extraire_intention(texte)
+
     lieu = intention["lieu"]
     horizon = intention["horizon"]
+    heure = intention.get("heure")
 
+    # Si aucun lieu n'est détecté, on sauvegarde quand même l'échec en base
+    # puis on renvoie une erreur claire au frontend.
     if not lieu:
         save_requete(RequeteMeteoCreate(
             texte_brut=texte,
@@ -236,49 +243,90 @@ def meteo_depuis_texte(request: Request, payload: MeteoTexteRequest) -> dict:
         )
 
     # =========================
-    # 4. Extraction du bon jour
+    # 4. Conversion horizon -> index jour
     # =========================
+    # Exemple :
+    # - aujourd'hui -> 0
+    # - demain -> 1
+    # - j+2 -> 2
 
     index_jour = horizon_to_index(horizon)
 
-    donnees_jour = extraire_donnees_jour(
-        meteo=meteo,
-        index=index_jour
-    )
+    # =========================
+    # 5. Extraction météo : daily ou hourly
+    # =========================
+    # C'est ici que se fait la vraie nouveauté.
+    #
+    # Si l'utilisateur a demandé une heure précise (ex: 20h),
+    # on utilise la météo horaire.
+    #
+    # Sinon, on garde le fonctionnement historique :
+    # météo journalière avec temp max / temp min / pluie / vent max.
 
-    if not donnees_jour:
-        raise HTTPException(
-            status_code=500,
-            detail="Impossible d'extraire les données météo du jour demandé."
+    if heure is not None:
+        donnees_meteo = extraire_donnees_heure(
+            meteo=meteo,
+            index_jour=index_jour,
+            heure=heure
         )
 
+        if not donnees_meteo:
+            raise HTTPException(
+                status_code=500,
+                detail="Impossible d'extraire les données météo de l'heure demandée."
+            )
+
+    else:
+        donnees_meteo = extraire_donnees_jour(
+            meteo=meteo,
+            index=index_jour
+        )
+
+        if not donnees_meteo:
+            raise HTTPException(
+                status_code=500,
+                detail="Impossible d'extraire les données météo du jour demandé."
+            )
+
     # =========================
-    # 5. Prévisions sur 7 jours
+    # 6. Prévisions sur 7 jours
     # =========================
+    # On continue à les renvoyer au frontend pour garder
+    # les graphiques et l'affichage global de l'application.
 
     previsions_7_jours = extraire_previsions_7_jours(meteo)
 
     # =========================
-    # 6. Sauvegarde en base
+    # 7. Sauvegarde en base
     # =========================
+    # On garde horizon strictement conforme au modèle Pydantic.
+    # L'heure est utilisée pour l'extraction météo, mais ne doit pas être
+    # concaténée dans horizon si le modèle n'accepte pas cette forme.
+
+    horizon_sauvegarde = horizon
 
     requete_id = save_requete(RequeteMeteoCreate(
         texte_brut=texte,
         lieu_detecte=coords["nom"],
-        horizon=horizon,
+        horizon=horizon_sauvegarde,
         latitude=latitude,
         longitude=longitude,
-        temp_max=donnees_jour["temp_max"],
-        temp_min=donnees_jour["temp_min"],
-        description=donnees_jour["description"],
-        code_meteo=donnees_jour["code_meteo"],
+        temp_max=donnees_meteo.get("temp_max"),
+        temp_min=donnees_meteo.get("temp_min"),
+        description=donnees_meteo["description"],
+        code_meteo=donnees_meteo["code_meteo"],
         service_stt="web_speech",
         statut="success"
     ))
 
     # =========================
-    # 7. Réponse API complète
+    # 8. Réponse API complète
     # =========================
+    # Le frontend recevra maintenant aussi :
+    # - heure
+    # - un meteo["type"] = "daily" ou "hourly"
+    #
+    # Cela lui permettra plus tard d'afficher les bons champs.
 
     return {
         "statut": "ok",
@@ -287,10 +335,11 @@ def meteo_depuis_texte(request: Request, payload: MeteoTexteRequest) -> dict:
         "lieu": coords["nom"],
         "pays": coords["pays"],
         "horizon": horizon,
+        "heure": heure,
         "index_jour": index_jour,
         "latitude": latitude,
         "longitude": longitude,
-        "meteo": donnees_jour,
+        "meteo": donnees_meteo,
         "previsions_7_jours": previsions_7_jours,
     }
 
@@ -359,7 +408,6 @@ def feedback_stats(request: Request) -> dict:
     _ = request
 
     stats = get_feedback_stats()
-
     total = stats["total"]
 
     if total > 0:

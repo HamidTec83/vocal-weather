@@ -430,15 +430,24 @@ def afficher_resultat(data: dict) -> None:
 
     meteo = data["meteo"]
     description = meteo.get("description", "")
+    type_meteo = meteo.get("type", "daily")  # ← ligne manquante
 
     st.success(f"📍 {data['lieu']} — horizon : {data['horizon']}")
 
     col1, col2, col3, col4 = st.columns(4)
 
-    col1.metric("🌡️ Temp. max", f"{meteo.get('temp_max')} °C")
-    col2.metric("❄️ Temp. min", f"{meteo.get('temp_min')} °C")
-    col3.metric("🌧️ Pluie", f"{meteo.get('precipitation')} mm")
-    col4.metric("💨 Vent", f"{meteo.get('vent_max')} km/h")
+    if type_meteo == "hourly":
+        # Affichage météo horaire
+        col1.metric("🌡️ Température", f"{meteo.get('temp')} °C")
+        col2.metric("💧 Humidité", f"{meteo.get('humidite')} %")
+        col3.metric("🌧️ Pluie", f"{meteo.get('precipitation')} mm")
+        col4.metric("💨 Vent", f"{meteo.get('vent')} km/h")
+    else:
+        # Affichage météo journalière
+        col1.metric("🌡️ Temp. max", f"{meteo.get('temp_max')} °C")
+        col2.metric("❄️ Temp. min", f"{meteo.get('temp_min')} °C")
+        col3.metric("🌧️ Pluie", f"{meteo.get('precipitation')} mm")
+        col4.metric("💨 Vent", f"{meteo.get('vent_max')} km/h")
 
     badge = badge_meteo(description)
 
@@ -465,18 +474,24 @@ def afficher_resultat(data: dict) -> None:
 
     afficher_feedback(data.get("requete_id"))
 
-    phrase_orale = (
-        f"La météo pour {data['lieu']} {data['horizon']} est : "
-        f"{description}. "
-        f"La température maximale est de {meteo.get('temp_max')} degrés, "
-        f"et la température minimale est de {meteo.get('temp_min')} degrés."
-        f"Les précipitations sont de {meteo.get('precipitation')} millimètres. "
-         f"Le vent maximal est de {meteo.get('vent_max')} kilomètres par heure."
-    )
+    if type_meteo == "hourly":
+        phrase_orale = (
+            f"La météo pour {data['lieu']} à {meteo.get('heure')} est : "
+            f"{description}. "
+            f"La température est de {meteo.get('temp')} degrés. "
+            f"Le vent est de {meteo.get('vent')} kilomètres par heure."
+        )
+    else:
+        phrase_orale = (
+            f"La météo pour {data['lieu']} {data['horizon']} est : "
+            f"{description}. "
+            f"La température maximale est de {meteo.get('temp_max')} degrés, "
+            f"et la température minimale est de {meteo.get('temp_min')} degrés. "
+            f"Les précipitations sont de {meteo.get('precipitation')} millimètres. "
+            f"Le vent maximal est de {meteo.get('vent_max')} kilomètres par heure."
+        )
 
     lire_reponse_orale(phrase_orale)
-
-
 # =========================
 # APPELS API
 # =========================

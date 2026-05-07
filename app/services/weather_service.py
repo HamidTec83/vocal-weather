@@ -6,8 +6,9 @@ Contient toute la logique liée à la météo :
 1. Transformer un nom de ville ou un code postal en coordonnées GPS
 2. Appeler l'API Open-Meteo
 3. Extraire les données météo d'un jour précis
-4. Extraire les prévisions météo sur 7 jours
-5. Transformer les codes météo WMO en descriptions lisibles
+4. Extraire les données météo d'une heure précise
+5. Extraire les prévisions météo sur 7 jours
+6. Transformer les codes météo WMO en descriptions lisibles
 """
 
 import re
@@ -17,6 +18,8 @@ import requests
 # =========================
 # Codes météo WMO
 # =========================
+# Open-Meteo renvoie un code météo numérique (code WMO).
+# On le convertit ici en texte lisible pour l'utilisateur.
 
 CODES_METEO = {
     0: "Ciel dégagé ☀️",
@@ -100,6 +103,7 @@ def obtenir_coordonnees_par_code_postal(code_postal: str) -> dict | None:
         if not data:
             return None
 
+        # On prend la première commune retournée par l'API.
         commune = data[0]
 
         centre = commune.get("centre", {})
@@ -108,6 +112,7 @@ def obtenir_coordonnees_par_code_postal(code_postal: str) -> dict | None:
         if len(coordinates) != 2:
             return None
 
+        # L'API renvoie [longitude, latitude]
         longitude = coordinates[0]
         latitude = coordinates[1]
 
@@ -200,10 +205,21 @@ def obtenir_coordonnees(lieu: str) -> dict | None:
 
 def obtenir_meteo(latitude: float, longitude: float) -> dict | None:
     """
-    Récupère les prévisions météo sur 7 jours
-    pour une latitude et une longitude données.
+    Récupère :
+    - les prévisions météo sur 7 jours
+    - la météo heure par heure
 
     Retourne le JSON complet de l'API Open-Meteo.
+
+    Important :
+    Open-Meteo renvoie les données horaires sous forme de tableaux parallèles :
+    - hourly.time
+    - hourly.temperature_2m
+    - hourly.precipitation
+    - hourly.weathercode
+    - hourly.windspeed_10m
+
+    Chaque position dans les tableaux correspond à une heure précise.
     """
 
     url = "https://api.open-meteo.com/v1/forecast"
@@ -212,6 +228,9 @@ def obtenir_meteo(latitude: float, longitude: float) -> dict | None:
         "latitude": latitude,
         "longitude": longitude,
 
+        # =========================
+        # Prévisions journalières
+        # =========================
         "daily": [
             "temperature_2m_max",
             "temperature_2m_min",
@@ -220,7 +239,22 @@ def obtenir_meteo(latitude: float, longitude: float) -> dict | None:
             "windspeed_10m_max",
         ],
 
+        # =========================
+        # Prévisions horaires
+        # =========================
+        "hourly": [
+            "temperature_2m",
+            "precipitation",
+            "weathercode",
+            "windspeed_10m",
+            "relativehumidity_2m",
+        ],
+
+        # =========================
+        # Météo actuelle
+        # =========================
         "current_weather": True,
+
         "timezone": "Europe/Paris",
         "forecast_days": 7,
     }
@@ -265,16 +299,97 @@ def extraire_donnees_jour(meteo: dict, index: int = 0) -> dict | None:
     vents_max = daily.get("windspeed_10m_max", [])
     codes = daily.get("weathercode", [])
 
+    # Vérifie que l'index demandé existe bien dans les tableaux journaliers
     if index < 0 or index >= len(temperatures_max):
         return None
 
     code = codes[index] if index < len(codes) else None
 
     return {
+        # On ajoute un type pour que le frontend sache si c'est du daily ou hourly
+        "type": "daily",
         "temp_max": temperatures_max[index],
         "temp_min": temperatures_min[index] if index < len(temperatures_min) else None,
         "precipitation": precipitations[index] if index < len(precipitations) else None,
         "vent_max": vents_max[index] if index < len(vents_max) else None,
+        "code_meteo": code,
+        "description": CODES_METEO.get(code, "Conditions inconnues"),
+    }
+
+
+# =========================
+# Extraction d'une heure précise
+# =========================
+
+def extraire_donnees_heure(meteo: dict, index_jour: int, heure: int) -> dict | None:
+    """
+    Extrait les données météo pour une heure précise d'un jour précis.
+
+    Exemple :
+    - index_jour = 0  -> aujourd'hui
+    - heure = 20      -> 20h
+    => on cherche l'entrée "YYYY-MM-DDT20:00" dans hourly.time
+
+    Pourquoi cette logique ?
+    Open-Meteo stocke les données hourly dans des tableaux.
+    Il faut donc retrouver l'index exact de l'heure demandée,
+    puis récupérer les autres valeurs à cette même position.
+    """
+
+    if not meteo:
+        return None
+
+    daily = meteo.get("daily", {})
+    hourly = meteo.get("hourly", {})
+
+    # Tableau des dates journalières (ex: ["2026-05-06", "2026-05-07", ...])
+    dates = daily.get("time", [])
+
+    # Tableaux horaires Open-Meteo
+    heures = hourly.get("time", [])
+    temperatures = hourly.get("temperature_2m", [])
+    precipitations = hourly.get("precipitation", [])
+    vents = hourly.get("windspeed_10m", [])
+    humidites = hourly.get("relativehumidity_2m", [])
+    codes = hourly.get("weathercode", [])
+
+    # Vérifie que le jour demandé existe
+    if index_jour < 0 or index_jour >= len(dates):
+        return None
+
+    # Vérifie que l'heure est valide
+    if heure < 0 or heure > 23:
+        return None
+
+    # Construit le timestamp exact attendu dans hourly.time
+    # Exemple : "2026-05-06T20:00"
+    date_cible = dates[index_jour]
+    timestamp_cible = f"{date_cible}T{heure:02d}:00"
+
+    # On cherche ce timestamp dans la liste des heures.
+    # S'il existe, on récupère son index.
+    try:
+        index_heure = heures.index(timestamp_cible)
+    except ValueError:
+        return None
+
+    code = codes[index_heure] if index_heure < len(codes) else None
+
+    return {
+        # Ce champ permet au frontend de savoir qu'on parle d'une météo horaire
+        "type": "hourly",
+
+        # Informations de contexte
+        "date_heure": timestamp_cible,
+        "heure": f"{heure:02d}h",
+
+        # Données météo horaires
+        "temp": temperatures[index_heure] if index_heure < len(temperatures) else None,
+        "precipitation": precipitations[index_heure] if index_heure < len(precipitations) else None,
+        "vent": vents[index_heure] if index_heure < len(vents) else None,
+        "humidite": humidites[index_heure] if index_heure < len(humidites) else None,
+
+        # Description lisible à partir du code WMO
         "code_meteo": code,
         "description": CODES_METEO.get(code, "Conditions inconnues"),
     }

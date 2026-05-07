@@ -20,7 +20,8 @@ from app.services.nlu_service import extraire_intention, horizon_to_index
 from app.services.weather_service import (
     obtenir_coordonnees,
     obtenir_meteo,
-    extraire_donnees_jour
+    extraire_donnees_jour,
+    extraire_donnees_heure
 )
 from app.database.db import save_requete
 from app.database.models import RequeteMeteoCreate
